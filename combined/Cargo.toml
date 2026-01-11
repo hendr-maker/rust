@@ -1,0 +1,26 @@
+[package]
+name = "combined"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rust-api"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+auth-service = { workspace = true, features = ["embedded"] }
+user-service = { workspace = true, features = ["embedded"] }
+gateway = { workspace = true, features = ["embedded"] }
+common = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# Utilities
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenvy = { workspace = true }

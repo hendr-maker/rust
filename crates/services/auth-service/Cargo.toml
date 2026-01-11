@@ -1,0 +1,53 @@
+[package]
+name = "auth-service"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "auth-service"
+path = "src/main.rs"
+
+[lib]
+name = "auth_service_lib"
+path = "src/lib.rs"
+
+[dependencies]
+# Internal crates
+domain = { workspace = true }
+common = { workspace = true, features = ["jwt", "cache"] }
+proto = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+
+# Cache
+redis = { workspace = true }
+
+# Security
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenvy = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+mockall = { workspace = true }
+tokio-test = { workspace = true }
+
+[features]
+default = []
+embedded = []

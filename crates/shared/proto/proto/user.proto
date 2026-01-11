@@ -1,0 +1,121 @@
+syntax = "proto3";
+package user;
+
+// User management service.
+service UserService {
+    // Get a user by ID (excludes soft-deleted)
+    rpc GetUser (GetUserRequest) returns (UserResponse);
+
+    // Get a user by ID (includes soft-deleted)
+    rpc GetUserWithDeleted (GetUserRequest) returns (UserResponse);
+
+    // Get a user by email (excludes soft-deleted)
+    rpc GetUserByEmail (GetUserByEmailRequest) returns (UserResponse);
+
+    // Get a user by email (includes soft-deleted)
+    rpc GetUserByEmailWithDeleted (GetUserByEmailRequest) returns (UserResponse);
+
+    // Internal: Get user by email with password hash (for auth-service only)
+    rpc GetUserByEmailInternal (GetUserByEmailRequest) returns (InternalUserResponse);
+
+    // Internal: Get user by email with password hash including deleted (for auth-service only)
+    rpc GetUserByEmailInternalWithDeleted (GetUserByEmailRequest) returns (InternalUserResponse);
+
+    // List all active users
+    rpc ListUsers (ListUsersRequest) returns (ListUsersResponse);
+
+    // List all users including soft-deleted
+    rpc ListUsersWithDeleted (ListUsersRequest) returns (ListUsersResponse);
+
+    // List only soft-deleted users
+    rpc ListDeletedUsers (ListUsersRequest) returns (ListUsersResponse);
+
+    // Create a new user (internal use)
+    rpc CreateUser (CreateUserRequest) returns (UserResponse);
+
+    // Update an existing user
+    rpc UpdateUser (UpdateUserRequest) returns (UserResponse);
+
+    // Soft delete a user
+    rpc DeleteUser (DeleteUserRequest) returns (DeleteUserResponse);
+
+    // Permanently delete a user
+    rpc HardDeleteUser (DeleteUserRequest) returns (DeleteUserResponse);
+
+    // Restore a soft-deleted user
+    rpc RestoreUser (RestoreUserRequest) returns (UserResponse);
+}
+
+// Request to get a user by ID
+message GetUserRequest {
+    string id = 1;
+}
+
+// Request to get a user by email
+message GetUserByEmailRequest {
+    string email = 1;
+}
+
+// User information response (public - no sensitive data)
+message UserResponse {
+    string id = 1;
+    string email = 2;
+    string name = 3;
+    string role = 4;
+    string created_at = 5;
+    string updated_at = 6;
+    optional string deleted_at = 7;
+}
+
+// Internal user response (includes password hash for auth-service)
+message InternalUserResponse {
+    string id = 1;
+    string email = 2;
+    string name = 3;
+    string role = 4;
+    string password_hash = 5;
+    string created_at = 6;
+    string updated_at = 7;
+    optional string deleted_at = 8;
+}
+
+// Request to list users with pagination
+message ListUsersRequest {
+    optional int32 limit = 1;
+    optional int32 offset = 2;
+}
+
+// Response with list of users
+message ListUsersResponse {
+    repeated UserResponse users = 1;
+    int32 total = 2;
+}
+
+// Request to create a new user
+message CreateUserRequest {
+    string email = 1;
+    string password_hash = 2;
+    string name = 3;
+}
+
+// Request to update a user
+message UpdateUserRequest {
+    string id = 1;
+    optional string name = 2;
+    optional string role = 3;
+}
+
+// Request to delete a user
+message DeleteUserRequest {
+    string id = 1;
+}
+
+// Response after deleting a user
+message DeleteUserResponse {
+    bool success = 1;
+}
+
+// Request to restore a soft-deleted user
+message RestoreUserRequest {
+    string id = 1;
+}

@@ -1,4 +1,4 @@
-# Build stage for combined binary (development)
+# Build stage for user service
 FROM rust:latest AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,8 +14,8 @@ COPY Cargo.toml Cargo.lock* ./
 COPY crates ./crates
 COPY combined ./combined
 
-# Build all workspace members
-RUN cargo build --release -p combined
+# Build user-service
+RUN cargo build --release -p user-service
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -27,10 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/rust-api ./app
+COPY --from=builder /app/target/release/user-service ./user-service
 
 ENV RUST_LOG=info
 
-EXPOSE 3000 50051 50052
+EXPOSE 50052
 
-CMD ["./app", "serve"]
+CMD ["./user-service", "serve"]

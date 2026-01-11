@@ -1,44 +1,81 @@
+version: "3.8"
+
+# Production configuration - Separate microservices
 services:
-  app:
-    build: .
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@db:5432/rust_app
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=${JWT_SECRET:-change-this-in-production-min-32-chars}
-      - JWT_EXPIRATION_HOURS=24
-      - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=3000
+      - AUTH_SERVICE_URL=http://auth-service:50051
+      - USER_SERVICE_URL=http://user-service:50052
+      - GATEWAY_REDIS_URL=redis://redis:6379/1
       - RUST_LOG=info
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
+      - auth-service
+      - user-service
+      - redis
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.auth
+    ports:
+      - "50051:50051"
+    environment:
+      - USER_SERVICE_URL=http://user-service:50052
+      - AUTH_SERVICE_REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRATION_HOURS=24
+      - RUST_LOG=info
+    depends_on:
+      - user-service
+      - redis
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  user-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.user
+    ports:
+      - "50052:50052"
+    environment:
+      - USER_SERVICE_DATABASE_URL=postgres://postgres:postgres@user-db:5432/user_db
+      - USER_SERVICE_REDIS_URL=redis://redis:6379/2
+      - RUST_LOG=info
+    depends_on:
+      user-db:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - app-network
 
-  db:
+  user-db:
     image: postgres:16-alpine
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=rust_app
-    ports:
-      - "5432:5432"
+      - POSTGRES_DB=user_db
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - user_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - app-network
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -48,7 +85,13 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - app-network
 
 volumes:
-  postgres_data:
+  user_db_data:
   redis_data:
+
+networks:
+  app-network:
+    driver: bridge

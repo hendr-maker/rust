@@ -1,0 +1,57 @@
+[package]
+name = "user-service"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "user-service"
+path = "src/main.rs"
+
+[lib]
+name = "user_service_lib"
+path = "src/lib.rs"
+
+[dependencies]
+# Internal crates
+domain = { workspace = true }
+common = { workspace = true, features = ["database"] }
+proto = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+
+# Database
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+
+# Cache
+redis = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenvy = { workspace = true }
+clap = { workspace = true }
+
+# Optional (for testing)
+mockall = { workspace = true, optional = true }
+
+[dev-dependencies]
+mockall = { workspace = true }
+tokio-test = { workspace = true }
+
+[features]
+default = []
+embedded = []
+test-utils = ["mockall"]

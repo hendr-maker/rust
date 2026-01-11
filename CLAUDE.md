@@ -6,14 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **rust-api-starter** - A production-ready Rust web API built with Axum, following Domain-Driven Design, Clean Architecture, SOLID, and DRY principles.
 
-**Architecture Type:** Modular Monolith (microservice-ready)
+**Architecture Type:** Microservices (with gRPC inter-service communication)
 
 ## Tech Stack
 
-- **Axum 0.7** - Web framework
+- **Axum 0.7** - Web framework (API Gateway)
+- **Tonic 0.12** - gRPC framework for inter-service communication
 - **SeaORM 1.0** - Async ORM for PostgreSQL
 - **Redis** - Caching, rate limiting, distributed locks, semaphores
-- **Apalis** - Background job processing
 - **JWT** - Authentication (jsonwebtoken + Argon2)
 - **Tokio** - Async runtime
 - **Docker** - Containerization
@@ -22,27 +22,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## CLI Commands
 
 ```bash
-# Start server
-cargo run -- serve
-cargo run -- serve --host 127.0.0.1 --port 8080
+# Combined binary (development mode - all services in one process)
+cargo run -p combined -- serve
+cargo run -p combined -- serve --gateway-port 3000 --auth-port 50051 --user-port 50052
 
-# Database migrations
-cargo run -- migrate up          # Run pending migrations
-cargo run -- migrate down        # Rollback last migration
-cargo run -- migrate status      # Check migration status
-cargo run -- migrate fresh       # Reset and re-run all
+# Database migrations (via combined binary)
+cargo run -p combined -- migrate up       # Run pending migrations
+cargo run -p combined -- migrate down     # Rollback last migration
+cargo run -p combined -- migrate status   # Check migration status
+cargo run -p combined -- migrate fresh    # Reset and re-run all
 
-# Background jobs
-cargo run -- jobs work           # Start job worker
-cargo run -- jobs list           # List pending jobs
+# Individual service binaries (production mode)
+cargo run -p gateway -- serve --port 3000
+cargo run -p auth-service -- serve --port 50051
+cargo run -p user-service -- serve --port 50052
 
-# Code generation
-cargo run -- generate entity product
-cargo run -- generate service payment
-cargo run -- generate migration create_orders
-
-# Verbose mode
-cargo run -- -v serve
+# User service migrations (owns the database)
+cargo run -p user-service -- migrate up
+cargo run -p user-service -- migrate status
 ```
 
 ## Development Commands
@@ -58,15 +55,99 @@ cargo test --test api_test       # Integration tests
 ## Docker Commands
 
 ```bash
-docker-compose up -d             # Start app + PostgreSQL + Redis
+# Development mode (combined binary - simpler for local dev)
+docker-compose -f docker-compose.dev.yml up -d   # Start combined + PostgreSQL + Redis
+docker-compose -f docker-compose.dev.yml down    # Stop containers
+docker-compose -f docker-compose.dev.yml logs -f # View logs
+
+# Production mode (separate microservices)
+docker-compose up -d             # Start gateway + auth + user + PostgreSQL + Redis
 docker-compose down              # Stop containers
 docker-compose logs -f           # View logs
 docker-compose exec redis redis-cli  # Redis CLI
 ```
 
+## Microservice Architecture
+
+```
+                    ┌─────────────────┐
+                    │  Load Balancer  │  (nginx/Traefik/AWS ALB)
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │    Gateway      │  HTTP REST API (:3000)
+                    │   (Axum)        │
+                    └────────┬────────┘
+                             │ gRPC
+              ┌──────────────┼──────────────┐
+              │              │              │
+     ┌────────▼────────┐     │     ┌────────▼────────┐
+     │  Auth Service   │     │     │  User Service   │
+     │  (Tonic gRPC)   │     │     │  (Tonic gRPC)   │
+     │     :50051      │     │     │     :50052      │
+     └────────┬────────┘     │     └────────┬────────┘
+              │              │              │
+              └──────────────┼──────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+     ┌────────▼────────┐     │     ┌────────▼────────┐
+     │     Redis       │     │     │   PostgreSQL    │
+     │ (sessions/cache)│     │     │   (user data)   │
+     └─────────────────┘     │     └─────────────────┘
+```
+
+**Service Responsibilities:**
+
+| Service | Port | Protocol | Database | Responsibilities |
+|---------|------|----------|----------|------------------|
+| gateway | 3000 | HTTP | Redis | REST API, auth middleware, rate limiting, OpenAPI |
+| auth-service | 50051 | gRPC | Redis | JWT, login, register, token verification |
+| user-service | 50052 | gRPC | PostgreSQL | User CRUD, soft delete, migrations |
+
+**Deployment Modes:**
+
+| Mode | Binary | Use Case |
+|------|--------|----------|
+| Development | `combined` (rust-api) | Local development, single-process debugging |
+| Production | Separate binaries | Kubernetes/Docker Swarm, independent scaling |
+
+## Workspace Structure
+
+```
+rust-api-starter/
+├── Cargo.toml                      # Workspace root
+├── docker-compose.yml              # Production (separate services)
+├── docker-compose.dev.yml          # Development (combined binary)
+├── Dockerfile                      # Combined binary
+├── Dockerfile.gateway              # Gateway service
+├── Dockerfile.auth                 # Auth service
+├── Dockerfile.user                 # User service
+│
+├── crates/
+│   ├── shared/
+│   │   ├── domain/                 # User entity, Password VO, DTOs
+│   │   ├── proto/                  # gRPC protobuf definitions
+│   │   └── common/                 # AppError, AppResult, configs
+│   │
+│   ├── services/
+│   │   ├── auth-service/           # Auth microservice
+│   │   │   └── src/{main.rs, lib.rs, grpc/, service/, client/}
+│   │   └── user-service/           # User microservice
+│   │       └── src/{main.rs, lib.rs, grpc/, service/, repository/, infra/}
+│   │
+│   └── gateway/                    # API Gateway
+│       └── src/{main.rs, lib.rs, handlers/, middleware/, clients/}
+│
+├── combined/                       # Combined binary for development
+│   └── src/main.rs
+│
+└── src/                            # (Legacy - original monolith code)
+```
+
 ## Health Check Endpoint
 
-The `/health` endpoint checks connectivity to all external services.
+The `/health` endpoint verifies Redis connectivity to ensure the gateway can function properly.
 
 **Request:**
 ```bash
@@ -78,9 +159,6 @@ curl http://localhost:3000/health
 {
   "status": "healthy",
   "services": {
-    "database": {
-      "status": "healthy"
-    },
     "redis": {
       "status": "healthy"
     }
@@ -93,12 +171,9 @@ curl http://localhost:3000/health
 {
   "status": "degraded",
   "services": {
-    "database": {
-      "status": "unhealthy",
-      "error": "Connection refused"
-    },
     "redis": {
-      "status": "healthy"
+      "status": "unhealthy",
+      "error": "Cache error: Connection refused"
     }
   }
 }
@@ -187,172 +262,233 @@ pub struct ApiDoc;
 
 ## Architecture (Clean Architecture + DDD)
 
+Each microservice follows Clean Architecture internally:
+
 ```
-rust-api-starter/
+crates/services/user-service/     # Example microservice
 ├── Cargo.toml
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-│
-├── src/
-│   ├── main.rs                  # CLI entry point
-│   ├── lib.rs                   # Library root, exports
-│   │
-│   ├── cli/                     # CLI argument parsing
-│   │   ├── mod.rs
-│   │   └── args.rs              # Clap definitions
-│   │
-│   ├── commands/                # CLI command implementations
-│   │   ├── mod.rs
-│   │   ├── serve.rs             # Start server
-│   │   ├── migrate.rs           # Database migrations
-│   │   ├── jobs.rs              # Background jobs
-│   │   └── generate.rs          # Code generation
-│   │
-│   ├── config/                  # Configuration layer
-│   │   ├── mod.rs
-│   │   ├── constants.rs         # Named constants
-│   │   └── settings.rs          # Environment config
-│   │
-│   ├── domain/                  # Domain layer (DDD)
-│   │   ├── mod.rs
-│   │   ├── user.rs              # User entity, DTOs
-│   │   └── password.rs          # Password value object
-│   │
-│   ├── services/                # Application layer
-│   │   ├── mod.rs
-│   │   ├── container.rs         # Service Container + parallel utils
-│   │   ├── auth_service.rs      # Authentication use cases
-│   │   └── user_service.rs      # User use cases
-│   │
-│   ├── infra/                   # Infrastructure layer
-│   │   ├── mod.rs
-│   │   ├── db.rs                # Database + migrations
-│   │   ├── cache.rs             # Redis caching
-│   │   ├── unit_of_work.rs      # Unit of Work pattern
-│   │   └── repositories/        # Data access
-│   │
-│   ├── api/                     # Presentation layer
-│   │   ├── mod.rs
-│   │   ├── routes.rs            # Route configuration
-│   │   ├── state.rs             # AppState (DI container)
-│   │   ├── handlers/            # HTTP handlers
-│   │   ├── middleware/          # Auth middleware
-│   │   └── extractors/          # Custom extractors
-│   │
-│   ├── jobs/                    # Background jobs
-│   ├── types/                   # Shared types (DRY)
-│   ├── utils/                   # Utilities (templates)
-│   └── errors.rs                # Centralized errors
-│
-└── tests/                       # Integration tests
+└── src/
+    ├── main.rs                   # CLI entry point (serve, migrate)
+    ├── lib.rs                    # Library root, exports
+    ├── config.rs                 # Service-specific config
+    │
+    ├── grpc/                     # gRPC layer (Presentation)
+    │   ├── mod.rs
+    │   └── user_grpc.rs          # gRPC handlers
+    │
+    ├── service/                  # Application layer
+    │   ├── mod.rs
+    │   └── user_service.rs       # Business logic + trait
+    │
+    ├── repository/               # Data access layer
+    │   ├── mod.rs
+    │   ├── user_repository.rs    # Repository trait + impl
+    │   └── entities/             # SeaORM entities
+    │
+    └── infra/                    # Infrastructure layer
+        ├── mod.rs
+        ├── db.rs                 # Database connection
+        └── migrations/           # SeaORM migrations
+
+crates/gateway/                   # API Gateway
+└── src/
+    ├── main.rs                   # CLI entry point
+    ├── lib.rs
+    ├── config.rs
+    ├── state.rs                  # AppState (DI container)
+    ├── routes.rs                 # Route configuration
+    │
+    ├── clients/                  # gRPC clients
+    │   ├── mod.rs
+    │   ├── auth_client.rs        # Calls auth-service
+    │   └── user_client.rs        # Calls user-service
+    │
+    ├── handlers/                 # HTTP handlers
+    │   ├── mod.rs
+    │   ├── auth_handler.rs
+    │   └── user_handler.rs
+    │
+    ├── middleware/               # HTTP middleware
+    │   ├── mod.rs
+    │   ├── auth.rs               # JWT validation
+    │   ├── rate_limit.rs         # Rate limiting
+    │   └── cache.rs              # Response caching
+    │
+    ├── extractors/               # Custom extractors
+    │   └── validated_json.rs     # Auto-validation
+    │
+    └── openapi.rs                # Swagger/OpenAPI setup
+
+crates/shared/                    # Shared crates
+├── domain/                       # Domain entities (no dependencies)
+│   └── src/{user.rs, password.rs, error.rs}
+├── common/                       # Shared utilities
+│   └── src/{error.rs, config.rs}
+└── proto/                        # gRPC definitions
+    ├── proto/{auth.proto, user.proto}
+    └── build.rs                  # Tonic code generation
 ```
 
 ## Layer Dependencies (Clean Architecture)
 
+**Within each microservice:**
 ```
 ┌─────────────────────────────────────────┐
 │              main.rs                     │  Entry Point
 ├─────────────────────────────────────────┤
-│                api/                      │  Presentation
-│  (handlers, middleware, routes)          │
+│              grpc/                       │  Presentation (gRPC)
+│  (handlers, proto conversion)            │
 ├─────────────────────────────────────────┤
-│              services/                   │  Application
-│  (use cases, orchestration)              │
+│             service/                     │  Application
+│  (business logic, use cases)             │
 ├─────────────────────────────────────────┤
-│               domain/                    │  Domain (Core)
-│  (entities, value objects, rules)        │
+│            repository/                   │  Data Access
+│  (trait + impl, entities)                │
 ├─────────────────────────────────────────┤
-│               infra/                     │  Infrastructure
-│  (db, repositories, external APIs)       │
+│              infra/                      │  Infrastructure
+│  (db connection, migrations)             │
 └─────────────────────────────────────────┘
+```
+
+**Shared crates:**
+```
+┌─────────────────────────────────────────┐
+│ domain (shared entities, DTOs)           │  Pure domain, no deps
+├─────────────────────────────────────────┤
+│ common (errors, config)                  │  Utilities
+├─────────────────────────────────────────┤
+│ proto (gRPC definitions)                 │  Generated code
+└─────────────────────────────────────────┘
+```
 
 Dependencies flow INWARD (outer layers depend on inner)
 Domain layer has NO external dependencies
-```
 
 ## SOLID Principles
 
-**S - Single Responsibility:** Each module has one purpose
-- `domain/user.rs` - User entity only
-- `services/auth_service.rs` - Authentication only
-- `api/handlers/` - HTTP handling only
+**S - Single Responsibility:** Each service/module has one purpose
+- `user-service` - User CRUD only
+- `auth-service` - Authentication only
+- `gateway` - HTTP routing/validation only
 
 **O - Open/Closed:** Extend via new implementations
 - Add new error variants without changing `AppError`
 - Add new services implementing existing traits
+- Add new gRPC methods without modifying existing ones
 
 **L - Liskov Substitution:** All implementations interchangeable
 - `MockUserRepository` can replace `UserStore`
 
 **I - Interface Segregation:** Small, focused traits
-- `ReadRepository`, `WriteRepository`, `DeleteRepository` separate
+- `UserService` trait separate from `UserRepository` trait
 
 **D - Dependency Inversion:** Depend on abstractions
-- Services depend on `dyn UserRepository`, not `UserStore`
+- Services depend on `dyn UserRepository`, not concrete `UserStore`
+- Gateway depends on gRPC client traits, not service implementations
 
 ## DRY Patterns
 
-**Constants:** All magic values in `config/constants.rs`
+**Shared Domain:** `User`, `UserRole`, `UserResponse` in `crates/shared/domain/`
 
-**Domain types:** `User`, `UserRole`, `UserResponse` in `domain/`
+**Shared Errors:** `AppError`, `AppResult<T>` in `crates/shared/common/`
 
-**Extractors:** `ValidatedJson<T>` auto-validates requests
+**Proto Definitions:** gRPC types defined once in `crates/shared/proto/`
 
-**Pagination:** `Paginated<T>`, `PaginationParams` reusable
+**Extractors:** `ValidatedJson<T>` auto-validates HTTP requests
 
 **Errors:** `AppError::conflict()`, `option.ok_or_not_found()?`
 
 ## Adding New Features
 
 **New Domain Entity:**
-1. Create in `domain/` with entity, value objects, DTOs
-2. Export in `domain/mod.rs`
+1. Create in `crates/shared/domain/src/` with entity, DTOs
+2. Export in `crates/shared/domain/src/lib.rs`
+3. Add `#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]` for OpenAPI
 
-**New Repository:**
-1. Create entity in `infra/repositories/entities/`
-2. Create trait + impl in `infra/repositories/`
+**New gRPC Method:**
+1. Add to proto file in `crates/shared/proto/proto/`
+2. Run `cargo build -p proto` to regenerate
+3. Implement in service's `grpc/` module
+4. Add client method in `crates/gateway/src/clients/`
+
+**New Repository (in a service):**
+1. Create entity in `repository/entities/`
+2. Create trait + impl in `repository/`
 3. Add `#[cfg_attr(test, automock)]` for testing
 
-**New Service:**
-1. Create trait + impl in `services/`
-2. Inject repository via constructor
-3. Wire in `main.rs`, add to `AppState`
-
-**New API Endpoint:**
-1. Create handler in `api/handlers/`
+**New HTTP Endpoint (in gateway):**
+1. Create handler in `crates/gateway/src/handlers/`
 2. Add routes in handler module
-3. Register in `api/routes.rs`
+3. Register in `crates/gateway/src/routes.rs`
+4. Add OpenAPI documentation with `#[utoipa::path]`
 
-**New Background Job:**
-1. Create in `jobs/` implementing `Job` trait
-2. Export in `jobs/mod.rs`
+**New Microservice:**
+See "Adding New Microservices" section below
 
 ## Environment Variables
 
 ```bash
-DATABASE_URL=postgres://user:pass@localhost:5432/db
+# Database (user-service)
+DATABASE_URL=postgres://user:pass@localhost:5432/user_db
+
+# Redis (auth-service, gateway)
 REDIS_URL=redis://127.0.0.1:6379
+
+# JWT (auth-service)
 JWT_SECRET=your-secret-key-minimum-32-characters  # Required, min 32 chars
 JWT_EXPIRATION_HOURS=24
+
+# Gateway HTTP server
 SERVER_HOST=0.0.0.0
 SERVER_PORT=3000
+
+# gRPC service addresses (gateway needs these)
+AUTH_SERVICE_URL=http://auth-service:50051
+USER_SERVICE_URL=http://user-service:50052
+
+# Rate limiting (gateway)
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW_SECONDS=60
+RATE_LIMIT_AUTH_REQUESTS=10
+RATE_LIMIT_AUTH_WINDOW_SECONDS=60
 ```
 
 ## Security Features
 
 - **JWT Secret**: Required in production, minimum 32 characters
 - **Password Hashing**: Argon2 with random salt per password
+- **Password Hash Isolation**: Password hashes only transmitted via internal gRPC methods (`GetUserByEmailInternal`), never exposed to gateway or external clients
 - **Authorization**: Role-based access control (user/admin)
 - **Input Validation**: All requests validated with validator crate
 - **Sensitive Data**: Passwords and secrets never logged or exposed
 - **Rate Limiting**: Fail-closed design - denies requests when Redis unavailable
 - **Timing Attack Protection**: Constant-time password verification prevents email enumeration
 - **Atomic Operations**: Semaphores use Lua scripts to prevent race conditions
+- **Fresh Token Data**: Token refresh uses current user data, ensuring role changes are reflected immediately
 
 ## Security Hardening
 
 The codebase implements several security best practices:
+
+**Password Hash Isolation**
+```protobuf
+// Public response - NO password hash (used by gateway, external clients)
+message UserResponse {
+    string id = 1;
+    string email = 2;
+    string name = 3;
+    string role = 4;
+    string created_at = 5;
+    string updated_at = 6;
+    optional string deleted_at = 7;
+}
+
+// Internal response - includes password hash (auth-service only)
+message InternalUserResponse {
+    // ... same fields plus:
+    string password_hash = 5;  // Only for auth-service
+}
+```
 
 **Rate Limiting (Fail-Closed)**
 ```rust
@@ -371,6 +507,17 @@ let (count, allowed) = match cache.check_rate_limit(...).await {
 let dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$...";
 let password_hash = user.map(|u| u.password_hash).unwrap_or(dummy_hash);
 let _ = Password::from_hash(password_hash).verify(&password);
+```
+
+**Fresh Token Refresh**
+```rust
+// Token refresh fetches current user data, not stale claims
+// Ensures role changes are immediately reflected in new tokens
+async fn refresh_token(&self, claims: &Claims) -> AppResult<TokenResponse> {
+    let user = self.user_client.find_by_email(&claims.email).await?
+        .ok_or(AppError::Unauthorized)?;
+    self.generate_token(&user)  // Fresh user data, not old claims
+}
 ```
 
 **Atomic Semaphore Operations**
@@ -398,9 +545,9 @@ let script = r#"
 - [ ] Enable Redis authentication in production
 - [ ] Use secrets management (not env vars) for sensitive data
 
-## Service Container
+## Service Container (Optional Pattern)
 
-The `services/container.rs` module provides centralized service access with parallel execution utilities.
+For complex services that need multiple dependencies, a Service Container pattern provides centralized service access with parallel execution utilities. This pattern can be used within individual microservices if needed.
 
 **Features:**
 - Centralized access to all application services
@@ -483,9 +630,9 @@ let result = Pipeline::new(user_id)
 | `ServiceContainer` | `ServiceContainer` | Service container trait |
 | `Services` | `Services` | Service container concrete implementation |
 
-## Unit of Work Pattern
+## Unit of Work Pattern (Optional)
 
-The `infra/unit_of_work.rs` module provides centralized repository access and transaction management.
+For services that need transactional operations across multiple repositories, the Unit of Work pattern provides centralized repository access and transaction management.
 
 **Benefits:**
 - Centralizes access to all repositories through a single entry point
@@ -930,49 +1077,104 @@ async fn call_external_api(cache: &Cache, data: &Data) -> AppResult<Response> {
 }
 ```
 
-## Modular Monolith Architecture
+## gRPC Communication
 
-This project uses a **Modular Monolith** pattern, not microservices.
+Inter-service communication uses Protocol Buffers (protobuf) with Tonic gRPC.
 
+**Proto Definitions (`crates/shared/proto/proto/`):**
+
+```protobuf
+// auth.proto - Authentication service
+service AuthService {
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Login(LoginRequest) returns (LoginResponse);
+    rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+    rpc RefreshToken(RefreshTokenRequest) returns (LoginResponse);
+}
+
+// user.proto - User management service
+service UserService {
+    // Public methods (no password hash in response)
+    rpc GetUser(GetUserRequest) returns (UserResponse);
+    rpc GetUserByEmail(GetUserByEmailRequest) returns (UserResponse);
+    rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+    rpc CreateUser(CreateUserRequest) returns (UserResponse);
+    rpc UpdateUser(UpdateUserRequest) returns (UserResponse);
+    rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+    rpc RestoreUser(RestoreUserRequest) returns (UserResponse);
+
+    // Internal methods (includes password hash - for auth-service only)
+    rpc GetUserByEmailInternal(GetUserByEmailRequest) returns (InternalUserResponse);
+    rpc GetUserByEmailInternalWithDeleted(GetUserByEmailRequest) returns (InternalUserResponse);
+}
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    SINGLE BINARY                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
-│  │ AuthService │  │ UserService │  │  EmailJob   │     │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘     │
-│         └────────────────┼────────────────┘             │
-│                          ▼                              │
-│          ┌───────────────┐  ┌───────────────┐          │
-│          │   Database    │  │     Redis     │          │
-│          └───────────────┘  └───────────────┘          │
-└─────────────────────────────────────────────────────────┘
+
+**Proto Message Security Model:**
+
+| Message | Contains Password Hash | Used By |
+|---------|----------------------|---------|
+| `UserResponse` | No | Gateway, external clients |
+| `InternalUserResponse` | Yes | Auth-service only |
+
+This separation ensures password hashes never leave the user-service except to auth-service for verification.
+
+**Adding New gRPC Methods:**
+
+1. Define in proto file (`crates/shared/proto/proto/*.proto`)
+2. Run `cargo build -p proto` to regenerate code
+3. Implement server trait in service crate
+4. Add client method in gateway
+
+**Service Communication Pattern:**
+```
+Gateway (HTTP) → AuthClient (gRPC) → Auth Service
+                                        ↓
+Gateway (HTTP) → UserClient (gRPC) → User Service ← Auth Service (gRPC)
 ```
 
-**Why Modular Monolith:**
+## Adding New Microservices
 
-| Aspect | Monolith | Microservices |
-|--------|----------|---------------|
-| Deployment | Single binary | Multiple binaries |
-| Database | Shared | Per service |
-| Communication | Function calls | HTTP/gRPC/Queue |
-| Complexity | Lower | Higher |
-| Team size | 1-10 developers | 10+ developers |
+**To add a new service (e.g., `product-service`):**
 
-**Benefits:**
-- Simple deployment (one container)
-- No network latency between services
-- Easier debugging (single process)
-- Lower infrastructure cost
-- Shared code without duplication
+1. **Create the crate:**
+```bash
+mkdir -p crates/services/product-service/src/{grpc,service,repository}
+```
 
-**Microservice-Ready Features:**
-- Clean service boundaries via traits
-- Dependency injection via `Arc<dyn Trait>`
-- Each service can be extracted to separate crate
-- Domain layer has no infrastructure dependencies
+2. **Add to workspace (`Cargo.toml`):**
+```toml
+[workspace]
+members = [
+    # ... existing
+    "crates/services/product-service",
+]
+```
 
-**When to Migrate to Microservices:**
-- Team grows beyond 10 developers
-- Need independent scaling per service
-- Different tech stacks needed
-- Deployment independence required
+3. **Create proto definition (`crates/shared/proto/proto/product.proto`):**
+```protobuf
+syntax = "proto3";
+package product;
+
+service ProductService {
+    rpc GetProduct(GetProductRequest) returns (ProductResponse);
+}
+```
+
+4. **Implement gRPC server (`src/grpc/product_grpc.rs`):**
+```rust
+#[tonic::async_trait]
+impl ProductServiceProto for ProductGrpcService {
+    async fn get_product(...) -> Result<Response<ProductResponse>, Status> {
+        // Implementation
+    }
+}
+```
+
+5. **Add client in gateway (`crates/gateway/src/clients/product_client.rs`):**
+```rust
+pub struct ProductClient {
+    client: ProductServiceClient<Channel>,
+}
+```
+
+6. **Wire into combined binary and docker-compose**

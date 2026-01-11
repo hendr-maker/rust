@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"cargo init\")",
+      "Bash(docker run:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker logs:*)",
+      "Bash(pwd:*)",
+      "Bash(TOKEN=\"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhMTI5M2U0Ny01NjBlLTRmNDctODRkYS03MGRlZTdiODE4MWYiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20iLCJyb2xlIjoidXNlciIsImV4cCI6MTc2ODE5MDc3MCwiaWF0IjoxNzY4MTA0MzcwfQ.BpnfPKhM48deMzMImek47U7rwdTjhCFf1RFYGPzLpQM\")",
+      "Bash(curl:*)"
+    ]
+  }
+}

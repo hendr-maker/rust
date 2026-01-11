@@ -1,0 +1,16 @@
+[package]
+name = "domain"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+argon2 = { workspace = true }
+utoipa = { workspace = true, optional = true }
+
+[features]
+default = []
+openapi = ["utoipa"]

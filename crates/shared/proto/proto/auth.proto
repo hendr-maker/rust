@@ -1,0 +1,64 @@
+syntax = "proto3";
+package auth;
+
+// Authentication service for user registration and login.
+service AuthService {
+    // Register a new user account
+    rpc Register (RegisterRequest) returns (RegisterResponse);
+
+    // Login with email and password
+    rpc Login (LoginRequest) returns (LoginResponse);
+
+    // Verify a JWT token
+    rpc VerifyToken (VerifyTokenRequest) returns (VerifyTokenResponse);
+
+    // Refresh an existing token
+    rpc RefreshToken (RefreshTokenRequest) returns (LoginResponse);
+}
+
+// Request to register a new user
+message RegisterRequest {
+    string email = 1;
+    string password = 2;
+    string name = 3;
+}
+
+// Response after successful registration
+message RegisterResponse {
+    string id = 1;
+    string email = 2;
+    string name = 3;
+    string role = 4;
+    string created_at = 5;
+}
+
+// Request to login with credentials
+message LoginRequest {
+    string email = 1;
+    string password = 2;
+}
+
+// Response with JWT token after successful login
+message LoginResponse {
+    string access_token = 1;
+    string token_type = 2;
+    int64 expires_in = 3;
+}
+
+// Request to verify a token
+message VerifyTokenRequest {
+    string token = 1;
+}
+
+// Response with token claims if valid
+message VerifyTokenResponse {
+    string user_id = 1;
+    string email = 2;
+    string role = 3;
+    bool valid = 4;
+}
+
+// Request to refresh a token
+message RefreshTokenRequest {
+    string token = 1;
+}

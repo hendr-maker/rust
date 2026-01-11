@@ -1,0 +1,27 @@
+[package]
+name = "common"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+domain = { workspace = true }
+thiserror = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Optional: for database errors
+sea-orm = { workspace = true, optional = true }
+jsonwebtoken = { workspace = true, optional = true }
+redis = { workspace = true, optional = true }
+
+[features]
+default = []
+database = ["sea-orm"]
+jwt = ["jsonwebtoken"]
+cache = ["redis"]
+full = ["database", "jwt", "cache"]
